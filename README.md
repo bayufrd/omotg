@@ -21,11 +21,11 @@ OMOTG is a Go-based bidirectional bridge that connects **Telegram** to **OpenCod
 | systemd | any | User-mode services (logind) |
 | OpenSSL | any | For generating self-signed cert |
 | Linux | any | Tested on Ubuntu |
-| Homebrew | latest | Optional — untuk install via `brew install omotg` |
+| Homebrew | latest | Optional — for installing via `brew install omotg` |
 
 ## Installation
 
-### Opsi 1: Homebrew (recommended)
+### Option 1: Homebrew (recommended)
 
 ```bash
 brew tap itokun99/omotg
@@ -34,7 +34,7 @@ brew install omotg
 
 This installs the binary to `$(brew --prefix)/bin/omotg` and the env template to `$(brew --prefix)/etc/omotg/env.template`.
 
-### Opsi 2: Build dari Source
+### Option 2: Build from Source
 
 ```bash
 git clone git@github.com:itokun99/omotg.git
@@ -43,7 +43,7 @@ go build -o omotg .
 sudo cp omotg /usr/local/bin/  # optional, for system-wide install
 ```
 
-Atau install langsung ke local bin:
+Or install directly to your local bin:
 
 ```bash
 go build -o ~/.local/bin/omotg/omotg .
@@ -240,7 +240,7 @@ brew uninstall omotg
 brew untap itokun99/omotg
 ```
 
-Kemudian lanjut ke langkah 1–3 di bawah untuk cleanup service & config.
+Then proceed to steps 1–3 below to clean up services & config.
 
 ### Manual
 
@@ -268,10 +268,10 @@ curl -X POST "https://api.telegram.org/bot<YOUR_TOKEN>/deleteWebhook"
 ### 4. Remove Binary & Config
 
 ```bash
-# Jika install via Homebrew:
+# If installed via Homebrew:
 rm -rf ~/.config/omotg
 
-# Jika install dari source:
+# If installed from source:
 rm -rf ~/.local/bin/omotg
 rm -rf ~/.config/omotg
 ```
@@ -290,7 +290,7 @@ This is normal if OMOTG was stopped. Start the service:
 systemctl --user start omotg
 ```
 
-### "OpenCode server sedang tidak tersedia"
+### "OpenCode server is not available"
 
 OpenCode serve is not running:
 
