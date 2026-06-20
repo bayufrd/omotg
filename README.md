@@ -1,0 +1,297 @@
+# OMOTG — Telegram ↔ OpenCode Bridge
+
+OMOTG is a Go-based bidirectional bridge that connects **Telegram** to **OpenCode** via an MCP SSE server and Telegram webhook. It allows you to interact with OpenCode directly from Telegram.
+
+## Features
+
+- **🤖 Telegram Bot** — Send messages to OpenCode and get responses via Telegram
+- **🔌 MCP SSE Server** — Exposes Telegram tools (`send_message`, `send_notification`) to any MCP client (including OpenCode itself)
+- **📦 Zero Dependencies** — Pure Go standard library, no external packages
+- **🔒 Secure** — Secret token verification, chat ID whitelist, self-signed TLS cert for webhook
+- **🧵 Session Management** — Thread-safe session store with auto-expiry and cleanup
+- **🧹 Auto Cleanup** — Expired sessions cleaned every 5 minutes
+- **📋 Systemd Integration** — Ships with systemd user service files for auto-start
+
+## Prerequisites
+
+| Requirement | Version | Notes |
+|-------------|---------|-------|
+| Go | 1.26+ | For building from source |
+| OpenCode CLI | latest | For `opencode serve` backend |
+| systemd | any | User-mode services (logind) |
+| OpenSSL | any | For generating self-signed cert |
+| Linux | any | Tested on Ubuntu |
+
+## Installation
+
+### 1. Clone & Build
+
+```bash
+git clone git@github.com:itokun99/omotg.git
+cd omotg
+go build -o omotg .
+sudo cp omotg /usr/local/bin/  # optional, for system-wide install
+```
+
+Or install directly to your local bin:
+
+```bash
+go build -o ~/.local/bin/omotg/omotg .
+```
+
+### 2. Generate TLS Certificate
+
+Telegram webhook requires HTTPS. Generate a self-signed certificate:
+
+```bash
+mkdir -p ~/.config/omotg
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout ~/.config/omotg/webhook.key \
+  -out ~/.config/omotg/webhook.crt \
+  -subj "/CN=your-domain.com" \
+  -addext "subjectAltName=DNS:your-domain.com"
+```
+
+Replace `your-domain.com` with your actual domain pointing to your server.
+
+### 3. Create Environment Config
+
+```bash
+cp env.template ~/.config/omotg/env
+# Then edit with your values:
+#   TELEGRAM_BOT_TOKEN — from @BotFather
+#   TELEGRAM_WEBHOOK_URL — https://your-domain.com:8443/webhook
+#   TELEGRAM_SECRET_TOKEN — any random string
+#   OPENCODE_SERVER_PASSWORD — any string (opencode serve on localhost ignores auth)
+```
+
+See [Configuration](#configuration) for all options.
+
+### 4. Set Up systemd Services
+
+Copy the systemd service files:
+
+```bash
+mkdir -p ~/.config/systemd/user
+```
+
+**opencode-serve.service** — starts OpenCode headless server:
+
+```ini
+[Unit]
+Description=OpenCode Headless Server (Serve)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/path/to/opencode serve --port 4096
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target
+```
+
+**omotg.service** — starts the OMOTG bridge:
+
+```ini
+[Unit]
+Description=OMOTG — Telegram ↔ OpenCode bridge
+After=network-online.target opencode-serve.service
+Wants=network-online.target
+BindsTo=opencode-serve.service
+
+[Service]
+Type=simple
+ExecStart=/path/to/omotg
+Restart=on-failure
+RestartSec=5
+EnvironmentFile=%h/.config/omotg/env
+NoNewPrivileges=true
+ProtectHome=read-only
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target
+```
+
+Then enable and start:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable opencode-serve omotg
+systemctl --user start opencode-serve omotg
+```
+
+## Configuration
+
+Configuration is via environment variables in `~/.config/omotg/env`:
+
+### Required
+
+| Variable | Description |
+|----------|-------------|
+| `TELEGRAM_BOT_TOKEN` | Bot token from [@BotFather](https://t.me/botfather) |
+| `TELEGRAM_WEBHOOK_URL` | Public HTTPS URL for Telegram webhook (e.g. `https://your.domain:8443/webhook`) |
+| `TELEGRAM_SECRET_TOKEN` | Custom secret string to verify webhook requests |
+| `OPENCODE_SERVER_PASSWORD` | Password for OpenCode API (opencode serve on localhost ignores auth, but field is required) |
+
+### Optional
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OPENCODE_SERVER_URL` | `http://127.0.0.1:4096` | OpenCode serve URL |
+| `OMOTG_WEBHOOK_PORT` | `8443` | Webhook TLS listen port |
+| `OMOTG_MCP_PORT` | `9090` | MCP SSE server port |
+| `OMOTG_ALLOWED_CHAT_IDS` | (empty = all allowed) | Comma-separated Telegram chat IDs |
+| `OMOTG_SESSION_TIMEOUT` | `300` | Session timeout in seconds |
+| `OMOTG_TLS_CERT_FILE` | `~/.config/omotg/webhook.crt` | TLS certificate path |
+| `OMOTG_TLS_KEY_FILE` | `~/.config/omotg/webhook.key` | TLS key path |
+
+## Usage
+
+### Telegram Commands
+
+| Command | Description |
+|---------|-------------|
+| `/start` | Welcome message |
+| `/help` | Show available commands |
+| `/status` | Check server status via OpenCode |
+| `/deploy <env>` | Deploy application to environment |
+| `/logs [N]` | Show last N lines of server logs (default: 50) |
+
+Any non-command message is forwarded to OpenCode as a free-form chat.
+
+### MCP Tools
+
+Available via the MCP SSE server at `http://127.0.0.1:9090/mcp/sse`:
+
+| Tool | Description |
+|------|-------------|
+| `send_message` | Send a text message to a Telegram chat |
+| `send_notification` | Send a notification to a Telegram chat |
+
+### OpenCode MCP Integration
+
+Add to your OpenCode config (`~/.config/opencode/opencode.json`):
+
+```json
+{
+  "mcp": {
+    "omotg": {
+      "type": "remote",
+      "url": "http://127.0.0.1:9090/mcp/sse"
+    }
+  }
+}
+```
+
+## Architecture
+
+```
+Telegram App          Server (VPS)                    OpenCode CLI
+    │                      │                              │
+    │  POST /webhook       │                              │
+    │  ────────────────────→  omotg (port 8443, TLS)      │
+    │                      │    │                         │
+    │                      │    │ POST /session           │
+    │                      │    │ POST /session/{id}/msg  │
+    │                      │    │ GET /global/event (SSE) │
+    │                      │    └───────────────────────→ opencode serve
+    │                      │                              │ (port 4096)
+    │                      │                              │
+    │  sendMessage         │                              │
+    │  ←────────────────────  omotg                       │
+    │                      │    │                         │
+    │                      │    │ MCP SSE endpoint        │
+    │                      │    │ http://127.0.0.1:9090   │
+    │                      │    │                         │
+    │                      │    │ ←── MCP tools ────── OpenCode
+```
+
+### Ports
+
+| Port | Service | Bind | Protocol |
+|------|---------|------|----------|
+| 8443 | OMOTG Webhook | `0.0.0.0` | HTTPS (TLS) |
+| 9090 | OMOTG MCP SSE | `127.0.0.1` | HTTP/SSE |
+| 4096 | OpenCode Serve | `127.0.0.1` | HTTP/REST |
+
+## Uninstall
+
+### 1. Stop & Disable Services
+
+```bash
+systemctl --user stop omotg opencode-serve
+systemctl --user disable omotg opencode-serve
+```
+
+### 2. Remove Service Files
+
+```bash
+rm ~/.config/systemd/user/omotg.service
+rm ~/.config/systemd/user/opencode-serve.service
+systemctl --user daemon-reload
+```
+
+### 3. Unregister Telegram Webhook
+
+```bash
+curl -X POST "https://api.telegram.org/bot<YOUR_TOKEN>/deleteWebhook"
+```
+
+### 4. Remove Binary & Config
+
+```bash
+rm -rf ~/.local/bin/omotg
+rm -rf ~/.config/omotg
+```
+
+### 5. Remove OpenCode MCP Config (optional)
+
+Edit `~/.config/opencode/opencode.json` and remove the `omotg` entry from the `mcp` section.
+
+## Troubleshooting
+
+### Webhook: "Connection refused" in getWebhookInfo
+
+This is normal if OMOTG was stopped. Start the service:
+
+```bash
+systemctl --user start omotg
+```
+
+### "OpenCode server sedang tidak tersedia"
+
+OpenCode serve is not running:
+
+```bash
+systemctl --user status opencode-serve
+systemctl --user start opencode-serve
+```
+
+### Checking Logs
+
+```bash
+# OMOTG logs
+journalctl --user -u omotg -f
+
+# OpenCode serve logs
+journalctl --user -u opencode-serve -f
+```
+
+## Security Notes
+
+- The webhook server uses a **self-signed certificate**. For production, set up a reverse proxy (Caddy/Nginx) with Let's Encrypt.
+- The MCP server binds to `127.0.0.1` only — not accessible from the network.
+- Chat ID whitelist is **highly recommended**. Without it, anyone who finds your bot can interact with OpenCode.
+- The secret token verifies that webhook requests are genuinely from Telegram.
+- OpenCode serve on localhost does not enforce authentication; keep it bound to 127.0.0.1.
+
+## License
+
+MIT
