@@ -13,12 +13,11 @@ import (
 	"time"
 )
 
-// SSEEvent represents a server-sent event from OpenCode's global event stream.
+// SSEEvent represents a parsed event from OpenCode's global event stream.
 type SSEEvent struct {
-	SessionID string `json:"session_id"`
-	Type      string `json:"type"`
-	Content   string `json:"content,omitempty"`
-	Error     string `json:"error,omitempty"`
+	SessionID string
+	Type      string // "delta", "text", "done", "error"
+	Content   string
 }
 
 // OCClient is an HTTP client for the OpenCode Serve REST API.
@@ -63,7 +62,7 @@ func (c *OCClient) CreateSession(ctx context.Context) (string, error) {
 	}
 
 	var result struct {
-		SessionID string `json:"session_id"`
+		SessionID string `json:"id"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", fmt.Errorf("decode create session response: %w", err)
@@ -76,7 +75,11 @@ func (c *OCClient) CreateSession(ctx context.Context) (string, error) {
 
 // SendMessage sends a prompt message to an existing session.
 func (c *OCClient) SendMessage(ctx context.Context, sessionID, prompt string) error {
-	body := map[string]string{"message": prompt}
+	body := map[string]interface{}{
+		"parts": []map[string]string{
+			{"type": "text", "text": prompt},
+		},
+	}
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(body); err != nil {
 		return fmt.Errorf("encode send message body: %w", err)
@@ -102,9 +105,33 @@ func (c *OCClient) SendMessage(ctx context.Context, sessionID, prompt string) er
 	return nil
 }
 
-// SubscribeEvents opens an SSE connection to the global event stream and returns
-// a channel that receives parsed events. The channel is closed when the context
-// is cancelled or the connection drops.
+type rawSSEEvent struct {
+	Payload json.RawMessage `json:"payload"`
+}
+
+type rawPayload struct {
+	Type       string          `json:"type"`
+	Properties json.RawMessage `json:"properties,omitempty"`
+}
+
+type propSession struct {
+	SessionID string `json:"sessionID"`
+}
+
+type propDelta struct {
+	SessionID string `json:"sessionID"`
+	Field     string `json:"field"`
+	Delta     string `json:"delta"`
+}
+
+type propUpdated struct {
+	SessionID string `json:"sessionID"`
+	Part      *struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"part,omitempty"`
+}
+
 func (c *OCClient) SubscribeEvents(ctx context.Context) (<-chan SSEEvent, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/global/event", http.NoBody)
 	if err != nil {
@@ -120,63 +147,88 @@ func (c *OCClient) SubscribeEvents(ctx context.Context) (<-chan SSEEvent, error)
 
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
-		return nil, fmt.Errorf("subscribe events: unexpected status %d", resp.StatusCode)
+		return nil, fmt.Errorf("subscribe events: status %d", resp.StatusCode)
 	}
 
-	ch := make(chan SSEEvent, 64)
+	ch := make(chan SSEEvent, 128)
 
 	go func() {
 		defer resp.Body.Close()
 		defer close(ch)
 
 		scanner := bufio.NewScanner(resp.Body)
-		// Large buffer for SSE lines (up to 1MB per line, 64KB initial)
 		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-
-		var ev SSEEvent
-		var dataBuf strings.Builder
 
 		for scanner.Scan() {
 			line := scanner.Text()
 
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+
+			data := strings.TrimPrefix(line, "data: ")
+
+			var raw rawSSEEvent
+			if err := json.Unmarshal([]byte(data), &raw); err != nil {
+				continue
+			}
+
+			var p rawPayload
+			if err := json.Unmarshal(raw.Payload, &p); err != nil {
+				continue
+			}
+
+			// Extract sessionID (present in most events)
+			var sessionID string
+			if p.Properties != nil {
+				var ps propSession
+				if err := json.Unmarshal(p.Properties, &ps); err == nil {
+					sessionID = ps.SessionID
+				}
+			}
+
 			switch {
-			case strings.HasPrefix(line, "event: "):
-				ev.Type = strings.TrimPrefix(line, "event: ")
-
-			case strings.HasPrefix(line, "data:"):
-				// Strip "data:" prefix and optional leading space
-				part := line[5:]
-				if len(part) > 0 && part[0] == ' ' {
-					part = part[1:]
-				}
-				if dataBuf.Len() > 0 {
-					dataBuf.WriteByte('\n')
-				}
-				dataBuf.WriteString(part)
-
-			case line == "":
-				// Empty line signals end of an event
-				if dataBuf.Len() == 0 {
+			case strings.HasPrefix(p.Type, "message.part.delta"):
+				var pd propDelta
+				if err := json.Unmarshal(p.Properties, &pd); err != nil || pd.Field != "text" {
 					continue
 				}
-
-				data := dataBuf.String()
-				// Attempt JSON parse; if it fails, store raw in Content.
-				if err := json.Unmarshal([]byte(data), &ev); err != nil {
-					ev.Content = data
-				}
-
+				ev := SSEEvent{SessionID: sessionID, Type: "delta", Content: pd.Delta}
 				select {
 				case ch <- ev:
 				case <-ctx.Done():
 					return
 				}
 
-				ev = SSEEvent{}
-				dataBuf.Reset()
+			case p.Type == "message.part.updated":
+				var pu propUpdated
+				if err := json.Unmarshal(p.Properties, &pu); err != nil || pu.Part == nil {
+					continue
+				}
+				if pu.Part.Type == "text" && pu.Part.Text != "" {
+					ev := SSEEvent{SessionID: sessionID, Type: "text", Content: pu.Part.Text}
+					select {
+					case ch <- ev:
+					case <-ctx.Done():
+						return
+					}
+				}
 
-			default:
-				// Ignore comments (lines starting with ":") and unknown fields.
+			case p.Type == "message.completed":
+				ev := SSEEvent{SessionID: sessionID, Type: "done"}
+				select {
+				case ch <- ev:
+				case <-ctx.Done():
+					return
+				}
+
+			case strings.HasPrefix(p.Type, "error"):
+				ev := SSEEvent{SessionID: sessionID, Type: "error", Content: p.Type}
+				select {
+				case ch <- ev:
+				case <-ctx.Done():
+					return
+				}
 			}
 		}
 

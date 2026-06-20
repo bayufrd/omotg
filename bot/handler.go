@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -162,25 +163,32 @@ func (b *Bot) streamSessionEvents(sessionID string, chatID int64) {
 		return
 	}
 
+	var buf strings.Builder
+
 	for ev := range events {
 		if ev.SessionID != sessionID {
 			continue
 		}
 
 		switch ev.Type {
-		case "message", "text":
-			if ev.Content != "" {
-				b.sendTelegram(chatID, ev.Content)
+		case "delta":
+			buf.WriteString(ev.Content)
+		case "text":
+			msg := ev.Content
+			if msg != "" {
+				b.sendTelegram(chatID, msg)
 			}
 		case "error":
-			errMsg := ev.Error
-			if errMsg == "" {
-				errMsg = ev.Content
+			msg := ev.Content
+			if msg == "" {
+				msg = "Unknown error"
 			}
-			if errMsg != "" {
-				b.sendTelegram(chatID, fmt.Sprintf("❌ Error: %s", errMsg))
+			b.sendTelegram(chatID, fmt.Sprintf("❌ Error: %s", msg))
+		case "done":
+			accumulated := strings.TrimSpace(buf.String())
+			if accumulated != "" {
+				b.sendTelegram(chatID, accumulated)
 			}
-		case "done", "complete":
 			b.sendTelegram(chatID, "✅ Selesai!")
 			return
 		}
