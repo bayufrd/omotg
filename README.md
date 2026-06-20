@@ -319,4 +319,10 @@ journalctl --user -u opencode-serve -f
 
 ## License
 
-MIT
+**CC BY-NC 4.0 — Attribution-NonCommercial 4.0 International**
+
+Copyright (c) 2026 Indrawan Lisanto
+
+You are free to share and adapt this software for **non-commercial purposes only**, provided you give appropriate credit. Commercial use is **strictly prohibited** without explicit permission.
+
+See [LICENSE](LICENSE) for full terms.
