@@ -8,12 +8,58 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
 
 // telegramMaxMessageLen is the Telegram sendMessage character limit (safe margin).
 const telegramMaxMessageLen = 4000
+
+// omotgMarker is prepended to all prompts sent to OpenCode so the agent
+// can detect the request came via Telegram (OMOTG) vs OpenCode TUI.
+const omotgMarker = "[OMOTG]"
+
+var htmlEscaper = strings.NewReplacer(
+	"&", "&amp;",
+	"<", "&lt;",
+	">", "&gt;",
+	"\"", "&quot;",
+)
+
+// safeTagRestorer restores known HTML tags after escaping, so Sisyphus can
+// use <pre>, <code>, <b>, <i>, etc. in responses for Telegram rendering.
+var safeTagRestorer = strings.NewReplacer(
+	"&lt;pre&gt;", "<pre>",
+	"&lt;/pre&gt;", "</pre>",
+	"&lt;code&gt;", "<code>",
+	"&lt;/code&gt;", "</code>",
+	"&lt;b&gt;", "<b>",
+	"&lt;/b&gt;", "</b>",
+	"&lt;i&gt;", "<i>",
+	"&lt;/i&gt;", "</i>",
+	"&lt;strong&gt;", "<strong>",
+	"&lt;/strong&gt;", "</strong>",
+	"&lt;em&gt;", "<em>",
+	"&lt;/em&gt;", "</em>",
+	"&lt;u&gt;", "<u>",
+	"&lt;/u&gt;", "</u>",
+	"&lt;s&gt;", "<s>",
+	"&lt;/s&gt;", "</s>",
+	"&lt;blockquote&gt;", "<blockquote>",
+	"&lt;/blockquote&gt;", "</blockquote>",
+)
+
+// escapeTelegramHTML escapes HTML special characters in s while preserving
+// known safe tags (<pre>, <code>, <b>, <i>, <strong>, <em>, <u>, <s>, <blockquote>).
+// This prevents raw <> from breaking Telegram's HTML parse mode.
+func escapeTelegramHTML(s string) string {
+	return safeTagRestorer.Replace(htmlEscaper.Replace(s))
+}
+
+func buildPrompt(chatID, threadID int64, prompt string) string {
+	return fmt.Sprintf("%s\nchat_id: %d\nthread_id: %d\n---\n%s", omotgMarker, chatID, threadID, prompt)
+}
 
 // BotConfig holds configuration for the Telegram bot handler.
 type BotConfig struct {
@@ -177,7 +223,7 @@ func (b *Bot) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		// Update last-used timestamp
 		b.sessions.Renew(sessionID)
 
-		responseText, err := b.ocClient.SendMessage(ctx, sessionID, cmd.Prompt)
+		responseText, err := b.ocClient.SendMessage(ctx, sessionID, buildPrompt(chatID, threadID, cmd.Prompt))
 		if err != nil {
 			slog.Error("webhook: send message to OpenCode", "error", err, "session_id", sessionID)
 			b.sendTelegram(chatID, threadID, fmt.Sprintf("❌ Gagal: %s", err))
@@ -310,7 +356,7 @@ func (b *Bot) handleSessionCommand(chatID, threadID int64, cmd ParsedCommand) {
 			go func() {
 				ctx2, cancel2 := context.WithTimeout(context.Background(), b.config.SessionTimeout)
 				defer cancel2()
-				resp, err := b.ocClient.SendMessage(ctx2, sessionID, cmd.Prompt)
+				resp, err := b.ocClient.SendMessage(ctx2, sessionID, buildPrompt(chatID, threadID, cmd.Prompt))
 				if err != nil {
 					b.sendTelegram(chatID, threadID, fmt.Sprintf("❌ Gagal: %s", err))
 					return
@@ -497,8 +543,9 @@ func (b *Bot) sendTelegram(chatID int64, threadID int64, text string) {
 
 func (b *Bot) sendTelegramChunk(chatID int64, threadID int64, text string) {
 	payload := map[string]interface{}{
-		"chat_id": chatID,
-		"text":    text,
+		"chat_id":    chatID,
+		"text":       escapeTelegramHTML(text),
+		"parse_mode": "HTML",
 	}
 	if threadID > 0 {
 		payload["message_thread_id"] = threadID
