@@ -39,41 +39,66 @@ func main() {
 	// Create session map.
 	sessions := bot.NewSessionMap()
 
-	// Create TopicClient for forum topics.
-	topicClient := bot.NewTopicClient(cfg.TelegramBotToken)
+	var bh *bot.Bot
+	if cfg.HasTelegramConfig() {
+		// Create TopicClient for forum topics.
+		topicClient := bot.NewTopicClient(cfg.TelegramBotToken)
 
-	// Create bot handler.
-	botCfg := &bot.BotConfig{
-		SecretToken:    cfg.SecretToken,
-		AllowedChatIDs: cfg.AllowedChatIDs,
-		SessionTimeout: time.Duration(cfg.SessionTimeout) * time.Second,
-		BotToken:       cfg.TelegramBotToken,
-	}
-	bh := bot.NewBot(botCfg, ocClient, sessions, topicClient)
+		// Create bot handler.
+		botCfg := &bot.BotConfig{
+			SecretToken:    cfg.SecretToken,
+			AllowedChatIDs: cfg.AllowedChatIDs,
+			SessionTimeout: time.Duration(cfg.SessionTimeout) * time.Second,
+			BotToken:       cfg.TelegramBotToken,
+		}
+		bh = bot.NewBot(botCfg, ocClient, sessions, topicClient)
 
-	if len(cfg.AllowedChatIDs) == 0 {
-		slog.Warn("no AllowedChatIDs configured — ALL chats are allowed")
-	}
+		if len(cfg.AllowedChatIDs) == 0 {
+			slog.Warn("no AllowedChatIDs configured — ALL Telegram chats are allowed")
+		}
 
-	// Register Telegram webhook on startup.
-	if err := registerWebhook(cfg.TelegramBotToken, cfg.WebhookURL, cfg.SecretToken, cfg.TLSCertFile); err != nil {
-		slog.Warn("webhook registration failed (will retry)", "error", err)
+		// Register Telegram webhook on startup.
+		if err := registerWebhook(cfg.TelegramBotToken, cfg.WebhookURL, cfg.SecretToken, cfg.TLSCertFile); err != nil {
+			slog.Warn("webhook registration failed (will retry)", "error", err)
+		} else {
+			slog.Info("webhook registered", "url", cfg.WebhookURL)
+		}
 	} else {
-		slog.Info("webhook registered", "url", cfg.WebhookURL)
+		slog.Info("telegram runtime disabled")
 	}
 
-	// Create MCP server and register Telegram tools.
+	waSender := bot.NewWhatsAppSender(cfg.WABaseURL, cfg.WASendPath, cfg.WAAPIToken)
+	waBotCfg := &bot.WhatsAppBotConfig{
+		InboundSecret:  cfg.WAInboundSecret,
+		ServiceSecret:  cfg.WAServiceSecret,
+		AllowedChatIDs: cfg.WAAllowedChatIDs,
+		SessionTimeout: time.Duration(cfg.SessionTimeout) * time.Second,
+	}
+	waBot := bot.NewWhatsAppBot(waBotCfg, ocClient, sessions, waSender)
+
+	// Create MCP server and register channel tools.
 	mcpBaseURL := "http://127.0.0.1:" + cfg.MCPPort
 	mcpServer := mcp.New(mcpBaseURL)
-	telegramSender := mcp.NewTelegramSender(cfg.TelegramBotToken)
-	mcp.RegisterTelegramTools(mcpServer, telegramSender)
+	if cfg.HasTelegramConfig() {
+		telegramSender := mcp.NewTelegramSender(cfg.TelegramBotToken)
+		mcp.RegisterTelegramTools(mcpServer, telegramSender)
+	}
+	mcp.RegisterWhatsAppTools(mcpServer, waSender)
 
 	// Start session cleanup goroutine.
 	go sessions.StartCleanup(context.Background(), 5*time.Minute)
 
 	// --- Webhook HTTP server ---
 	webhookMux := http.NewServeMux()
-	webhookMux.HandleFunc("POST /webhook", bh.HandleWebhook)
+	if bh != nil {
+		webhookMux.HandleFunc("POST /webhook", bh.HandleWebhook)
+	}
+	if cfg.HasWhatsAppConfig() {
+		webhookMux.HandleFunc("POST /internal/wa/inbound", waBot.HandleInbound)
+		slog.Info("whatsapp runtime enabled", "send_url", cfg.WhatsAppSendURL())
+	} else {
+		slog.Info("whatsapp runtime disabled")
+	}
 	webhookMux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
@@ -170,7 +195,7 @@ func registerWebhook(token, url, secret, certFile string) error {
 		contentType = w.FormDataContentType()
 	} else {
 		payload := map[string]interface{}{
-			"url":            url,
+			"url":             url,
 			"allowed_updates": []string{"message", "channel_post"},
 		}
 		if secret != "" {

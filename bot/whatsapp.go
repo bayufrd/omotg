@@ -118,21 +118,19 @@ func ParseWhatsAppCommand(commandText, fallbackText string) ParsedCommand {
 	if commandText != "" {
 		lower := strings.ToLower(commandText)
 		switch {
-		case lower == "mulai session baru":
-			return ParseMessage("/session new")
-		case lower == "session baru":
-			return ParseMessage("/session new")
-		case lower == "bantuan":
+		case lower == "help", lower == "bantuan":
 			return ParseMessage("/help")
-		case lower == "mulai":
+		case lower == "start", lower == "mulai":
 			return ParseMessage("/start")
 		case lower == "status":
 			return ParseMessage("/status")
-		case strings.HasPrefix(lower, "deploy "):
+		case lower == "mulai session baru", lower == "session baru":
+			return ParseMessage("/session new")
+		case strings.HasPrefix(lower, "deploy"):
 			return ParseMessage("/" + lower)
 		case strings.HasPrefix(lower, "logs"):
 			return ParseMessage("/" + lower)
-		case strings.HasPrefix(lower, "session ") || lower == "session":
+		case strings.HasPrefix(lower, "session"):
 			return ParseMessage("/" + lower)
 		}
 		return ParsedCommand{Type: CmdFreeChat, RawText: commandText, Prompt: commandText}

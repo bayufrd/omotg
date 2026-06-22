@@ -65,12 +65,31 @@ func TestLoadConfig(t *testing.T) {
 }
 
 func TestLoadConfig_MissingRequired(t *testing.T) {
-	for _, k := range []string{"TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_URL", "TELEGRAM_SECRET_TOKEN", "OPENCODE_SERVER_PASSWORD"} {
+	for _, k := range []string{"TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_URL", "TELEGRAM_SECRET_TOKEN", "OPENCODE_SERVER_PASSWORD", "OMOTG_WA_INBOUND_SECRET", "OMOTG_WA_SERVICE_SECRET"} {
 		os.Unsetenv(k)
 	}
 	_, err := LoadConfig()
 	if err == nil {
 		t.Fatal("LoadConfig() expected error for missing required fields")
+	}
+}
+
+func TestLoadConfig_WhatsAppOnly(t *testing.T) {
+	for _, k := range []string{"TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_URL", "TELEGRAM_SECRET_TOKEN"} {
+		os.Unsetenv(k)
+	}
+	t.Setenv("OPENCODE_SERVER_PASSWORD", "p")
+	t.Setenv("OMOTG_WA_INBOUND_SECRET", "wa-secret")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error: %v", err)
+	}
+	if !cfg.HasWhatsAppConfig() {
+		t.Fatal("HasWhatsAppConfig() = false")
+	}
+	if cfg.HasTelegramConfig() {
+		t.Fatal("HasTelegramConfig() = true")
 	}
 }
 

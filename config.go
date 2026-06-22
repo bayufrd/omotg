@@ -42,6 +42,14 @@ func (c *Config) WhatsAppSendURL() string {
 	return base + path
 }
 
+func (c *Config) HasWhatsAppConfig() bool {
+	return c.WAInboundSecret != "" || c.WAServiceSecret != ""
+}
+
+func (c *Config) HasTelegramConfig() bool {
+	return c.TelegramBotToken != "" && c.WebhookURL != "" && c.SecretToken != ""
+}
+
 func LoadConfig() (*Config, error) {
 	home, _ := os.UserHomeDir()
 	defaultCert := home + "/.config/omotg/webhook.crt"
@@ -61,18 +69,24 @@ func LoadConfig() (*Config, error) {
 		WAServiceSecret: os.Getenv("OMOTG_WA_SERVICE_SECRET"),
 	}
 
+	cfg.TelegramBotToken = os.Getenv("TELEGRAM_BOT_TOKEN")
+	cfg.WebhookURL = os.Getenv("TELEGRAM_WEBHOOK_URL")
+	cfg.SecretToken = os.Getenv("TELEGRAM_SECRET_TOKEN")
+
 	var missing []string
-	if cfg.TelegramBotToken = os.Getenv("TELEGRAM_BOT_TOKEN"); cfg.TelegramBotToken == "" {
-		missing = append(missing, "TELEGRAM_BOT_TOKEN")
-	}
-	if cfg.WebhookURL = os.Getenv("TELEGRAM_WEBHOOK_URL"); cfg.WebhookURL == "" {
-		missing = append(missing, "TELEGRAM_WEBHOOK_URL")
-	}
-	if cfg.SecretToken = os.Getenv("TELEGRAM_SECRET_TOKEN"); cfg.SecretToken == "" {
-		missing = append(missing, "TELEGRAM_SECRET_TOKEN")
-	}
 	if cfg.OpenCodePassword = os.Getenv("OPENCODE_SERVER_PASSWORD"); cfg.OpenCodePassword == "" {
 		missing = append(missing, "OPENCODE_SERVER_PASSWORD")
+	}
+	if !cfg.HasWhatsAppConfig() {
+		if cfg.TelegramBotToken == "" {
+			missing = append(missing, "TELEGRAM_BOT_TOKEN")
+		}
+		if cfg.WebhookURL == "" {
+			missing = append(missing, "TELEGRAM_WEBHOOK_URL")
+		}
+		if cfg.SecretToken == "" {
+			missing = append(missing, "TELEGRAM_SECRET_TOKEN")
+		}
 	}
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("missing required env vars: %s", strings.Join(missing, ", "))
