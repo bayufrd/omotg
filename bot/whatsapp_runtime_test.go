@@ -244,3 +244,32 @@ func TestWhatsAppBotHandleManualSendUnauthorized(t *testing.T) {
 		t.Fatalf("status = %d", w.Code)
 	}
 }
+
+func TestWhatsAppBotHandleInboundDuplicateMessage(t *testing.T) {
+	bot := NewWhatsAppBot(&WhatsAppBotConfig{InboundSecret: "secret", SessionTimeout: time.Second}, NewOCClient("http://example.com", "p"), NewSessionMap(), NewWhatsAppSender("http://example.com", "/send", ""))
+	payload := WhatsAppInboundPayload{
+		Command: "help",
+		User:    WhatsAppInboundUser{WANumber: "628123"},
+		Message: WhatsAppInboundMessage{ID: "msg-dup-1", Body: "help"},
+	}
+	body, _ := json.Marshal(payload)
+
+	req1 := httptest.NewRequest(http.MethodPost, "/internal/wa/inbound", bytes.NewReader(body))
+	req1.Header.Set("Authorization", "Bearer secret")
+	w1 := httptest.NewRecorder()
+	bot.HandleInbound(w1, req1)
+	if w1.Code != http.StatusOK {
+		t.Fatalf("first status = %d", w1.Code)
+	}
+
+	req2 := httptest.NewRequest(http.MethodPost, "/internal/wa/inbound", bytes.NewReader(body))
+	req2.Header.Set("Authorization", "Bearer secret")
+	w2 := httptest.NewRecorder()
+	bot.HandleInbound(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("second status = %d", w2.Code)
+	}
+	if !strings.Contains(w2.Body.String(), "Pesan duplikat diabaikan") {
+		t.Fatalf("second body = %s", w2.Body.String())
+	}
+}

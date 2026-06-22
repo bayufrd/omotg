@@ -186,12 +186,11 @@ func (b *WhatsAppBot) HandleManualSend(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	result, err := b.sender.SendText(ctx, req.Number, req.Message)
 	if err != nil {
-		b.deliveryLog.RecordAttempt("manual-send", req.Number, "failed", err)
 		slog.Error("whatsapp manual send failed", "error", err, "number", req.Number)
-		b.writeReply(w, http.StatusBadGateway, fmt.Sprintf("Gagal kirim pesan: %s", err))
+		b.writeSendFailure(w, "manual-send", req.Number, err)
 		return
 	}
-	b.deliveryLog.RecordAttempt("manual-send", req.Number, "sent", nil)
+	b.recordDeliverySuccess("manual-send", req.Number)
 	slog.Info("whatsapp manual send success", "number", req.Number)
 	b.writeReply(w, http.StatusOK, result)
 }
@@ -205,26 +204,33 @@ func (b *WhatsAppBot) processAsyncPrompt(ctx context.Context, msg NormalizedWhat
 	result, err := b.ocClient.SendMessage(ctx, sessionID, buildWhatsAppPrompt(msg, sessionID, prompt))
 	if err != nil {
 		slog.Error("whatsapp OpenCode request failed", "error", err, "session_id", sessionID)
-		_, sendErr := b.sender.SendText(context.Background(), msg.ReplyTarget, fmt.Sprintf("❌ Gagal memproses pesan: %s", err))
-		if sendErr != nil {
-			b.deliveryLog.RecordAttempt(msg.MessageID, msg.ReplyTarget, "failed", sendErr)
-			slog.Error("whatsapp outbound send failed", "error", sendErr, "target", msg.ReplyTarget)
-			return
-		}
-		b.deliveryLog.RecordAttempt(msg.MessageID, msg.ReplyTarget, "sent", nil)
+		b.sendAsyncReply(msg.MessageID, msg.ReplyTarget, fmt.Sprintf("❌ Gagal memproses pesan: %s", err))
 		return
 	}
 	if strings.TrimSpace(result) == "" {
 		result = "OK"
 	}
-	_, sendErr := b.sender.SendText(context.Background(), msg.ReplyTarget, result)
-	if sendErr != nil {
-		b.deliveryLog.RecordAttempt(msg.MessageID, msg.ReplyTarget, "failed", sendErr)
-		slog.Error("whatsapp outbound send failed", "error", sendErr, "target", msg.ReplyTarget)
+	b.sendAsyncReply(msg.MessageID, msg.ReplyTarget, result)
+	slog.Info("whatsapp outbound send success", "target", msg.ReplyTarget, "session_id", sessionID)
+}
+
+func (b *WhatsAppBot) sendAsyncReply(messageID, target, message string) {
+	_, err := b.sender.SendText(context.Background(), target, message)
+	if err != nil {
+		b.deliveryLog.RecordAttempt(messageID, target, "failed", err)
+		slog.Error("whatsapp outbound send failed", "error", err, "target", target)
 		return
 	}
-	b.deliveryLog.RecordAttempt(msg.MessageID, msg.ReplyTarget, "sent", nil)
-	slog.Info("whatsapp outbound send success", "target", msg.ReplyTarget, "session_id", sessionID)
+	b.recordDeliverySuccess(messageID, target)
+}
+
+func (b *WhatsAppBot) writeSendFailure(w http.ResponseWriter, messageID, target string, err error) {
+	b.deliveryLog.RecordAttempt(messageID, target, "failed", err)
+	b.writeReply(w, http.StatusBadGateway, fmt.Sprintf("Gagal kirim pesan: %s", err))
+}
+
+func (b *WhatsAppBot) recordDeliverySuccess(messageID, target string) {
+	b.deliveryLog.RecordAttempt(messageID, target, "sent", nil)
 }
 
 func (b *WhatsAppBot) resolveConversationSession(ctx context.Context, conversationID int64) (string, bool, error) {

@@ -144,3 +144,20 @@ func TestLoadConfig_InvalidChatID(t *testing.T) {
 		t.Fatal("expected error for invalid chat ID")
 	}
 }
+
+func TestLoadConfig_WhatsAppTokenFallback(t *testing.T) {
+	for _, k := range []string{"WHATSAPP_API_TOKEN", "TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_URL", "TELEGRAM_SECRET_TOKEN"} {
+		os.Unsetenv(k)
+	}
+	t.Setenv("OPENCODE_SERVER_PASSWORD", "p")
+	t.Setenv("OMOTG_WA_INBOUND_SECRET", "wa-secret")
+	t.Setenv("JWT_TOKEN_WHATSAPP", "legacy-token")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error: %v", err)
+	}
+	if cfg.WAAPIToken != "legacy-token" {
+		t.Fatalf("WAAPIToken = %q", cfg.WAAPIToken)
+	}
+}
