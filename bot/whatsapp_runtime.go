@@ -20,18 +20,20 @@ type WhatsAppBotConfig struct {
 }
 
 type WhatsAppBot struct {
-	config   *WhatsAppBotConfig
-	ocClient *OCClient
-	sessions *SessionMap
-	sender   *WhatsAppSender
+	config      *WhatsAppBotConfig
+	ocClient    *OCClient
+	sessions    *SessionMap
+	sender      *WhatsAppSender
+	deliveryLog *DeliveryLog
 }
 
 func NewWhatsAppBot(cfg *WhatsAppBotConfig, ocClient *OCClient, sessions *SessionMap, sender *WhatsAppSender) *WhatsAppBot {
 	return &WhatsAppBot{
-		config:   cfg,
-		ocClient: ocClient,
-		sessions: sessions,
-		sender:   sender,
+		config:      cfg,
+		ocClient:    ocClient,
+		sessions:    sessions,
+		sender:      sender,
+		deliveryLog: NewDeliveryLog(),
 	}
 }
 
@@ -85,6 +87,11 @@ func (b *WhatsAppBot) HandleInbound(w http.ResponseWriter, r *http.Request) {
 	}
 
 	normalized := payload.Normalize()
+	if !b.deliveryLog.MarkProcessed(normalized.MessageID) {
+		slog.Warn("whatsapp inbound duplicate ignored", "message_id", normalized.MessageID)
+		b.writeReply(w, http.StatusOK, "Pesan duplikat diabaikan.")
+		return
+	}
 	if !b.isAllowed(normalized) {
 		slog.Warn("whatsapp inbound identifier not allowed", "conversation_key", normalized.ConversationKey, "chat_id", normalized.ChatID, "wa_number", normalized.WANumber)
 		b.writeReply(w, http.StatusOK, "Maaf, kamu tidak punya akses.")
@@ -179,10 +186,12 @@ func (b *WhatsAppBot) HandleManualSend(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	result, err := b.sender.SendText(ctx, req.Number, req.Message)
 	if err != nil {
+		b.deliveryLog.RecordAttempt("manual-send", req.Number, "failed", err)
 		slog.Error("whatsapp manual send failed", "error", err, "number", req.Number)
 		b.writeReply(w, http.StatusBadGateway, fmt.Sprintf("Gagal kirim pesan: %s", err))
 		return
 	}
+	b.deliveryLog.RecordAttempt("manual-send", req.Number, "sent", nil)
 	slog.Info("whatsapp manual send success", "number", req.Number)
 	b.writeReply(w, http.StatusOK, result)
 }
@@ -198,8 +207,11 @@ func (b *WhatsAppBot) processAsyncPrompt(ctx context.Context, msg NormalizedWhat
 		slog.Error("whatsapp OpenCode request failed", "error", err, "session_id", sessionID)
 		_, sendErr := b.sender.SendText(context.Background(), msg.ReplyTarget, fmt.Sprintf("❌ Gagal memproses pesan: %s", err))
 		if sendErr != nil {
+			b.deliveryLog.RecordAttempt(msg.MessageID, msg.ReplyTarget, "failed", sendErr)
 			slog.Error("whatsapp outbound send failed", "error", sendErr, "target", msg.ReplyTarget)
+			return
 		}
+		b.deliveryLog.RecordAttempt(msg.MessageID, msg.ReplyTarget, "sent", nil)
 		return
 	}
 	if strings.TrimSpace(result) == "" {
@@ -207,9 +219,11 @@ func (b *WhatsAppBot) processAsyncPrompt(ctx context.Context, msg NormalizedWhat
 	}
 	_, sendErr := b.sender.SendText(context.Background(), msg.ReplyTarget, result)
 	if sendErr != nil {
+		b.deliveryLog.RecordAttempt(msg.MessageID, msg.ReplyTarget, "failed", sendErr)
 		slog.Error("whatsapp outbound send failed", "error", sendErr, "target", msg.ReplyTarget)
 		return
 	}
+	b.deliveryLog.RecordAttempt(msg.MessageID, msg.ReplyTarget, "sent", nil)
 	slog.Info("whatsapp outbound send success", "target", msg.ReplyTarget, "session_id", sessionID)
 }
 

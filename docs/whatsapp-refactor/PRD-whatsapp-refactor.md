@@ -768,6 +768,12 @@ Catatan:
 
 ## 17. Roadmap Engineering
 
+Status roadmap saat ini:
+- Phase 0 selesai
+- Phase 1 selesai secara fungsional
+- Phase 2 sedang berjalan
+- ada koreksi teknis lanjutan untuk stabilisasi flow WhatsApp sebelum lanjut ke persistence
+
 ## Phase 0 — Dokumentasi dan keputusan desain
 
 Output:
@@ -777,7 +783,7 @@ Output:
 - data model dan opsi persistence terdokumentasi
 
 Status:
-- current phase
+- done
 
 ## Phase 1 — Minimal WhatsApp MVP tanpa DB
 
@@ -807,6 +813,12 @@ Target:
 - rename MCP tools jadi channel-appropriate
 - rapikan config/env
 - update README
+
+Catatan progres teknis:
+- perbaiki fallback token outbound agar kompatibel dengan `WHATSAPP_API_TOKEN` dan `JWT_TOKEN_WHATSAPP`
+- tambah idempotency guard untuk inbound webhook berdasarkan `message.id`
+- tambah delivery attempt log dasar untuk manual send dan async outbound
+- lanjutkan cleanup boundary setelah flow delivery stabil
 
 Keberhasilan:
 - codebase lebih bersih dan maintainable

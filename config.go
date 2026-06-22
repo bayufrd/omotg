@@ -64,7 +64,7 @@ func LoadConfig() (*Config, error) {
 		TLSKeyFile:      envOrDefault("OMOTG_TLS_KEY_FILE", defaultKey),
 		WAInboundSecret: os.Getenv("OMOTG_WA_INBOUND_SECRET"),
 		WABaseURL:       envOrDefault("WHATSAPP_BASE_URL", "http://127.0.0.1:8090"),
-		WAAPIToken:      os.Getenv("WHATSAPP_API_TOKEN"),
+		WAAPIToken:      firstEnv("WHATSAPP_API_TOKEN", "JWT_TOKEN_WHATSAPP"),
 		WASendPath:      envOrDefault("WHATSAPP_SEND_PATH", "/api/whatsapp/send-personal"),
 		WAServiceSecret: os.Getenv("OMOTG_WA_SERVICE_SECRET"),
 	}
@@ -125,6 +125,15 @@ func LoadConfig() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func firstEnv(keys ...string) string {
+	for _, key := range keys {
+		if v := os.Getenv(key); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func envOrDefault(key, def string) string {
