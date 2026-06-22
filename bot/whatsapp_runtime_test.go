@@ -194,3 +194,53 @@ func TestWhatsAppBotSessionList(t *testing.T) {
 		t.Fatalf("text = %q", text)
 	}
 }
+
+func TestWhatsAppManualSendRequestValidate(t *testing.T) {
+	if err := (WhatsAppManualSendRequest{Number: "628123", Message: "Halo"}).Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if err := (WhatsAppManualSendRequest{}).Validate(); err == nil {
+		t.Fatal("Validate() expected error")
+	}
+}
+
+func TestWhatsAppBotHandleManualSend(t *testing.T) {
+	sent := make(chan string, 1)
+	sender := NewWhatsAppSender("http://wa.local", "/send", "")
+	sender.HTTPClient = &http.Client{Transport: stubRoundTripper(func(r *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(r.Body)
+		sent <- string(body)
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"success":true}`)), Header: make(http.Header)}, nil
+	})}
+	bot := NewWhatsAppBot(&WhatsAppBotConfig{InboundSecret: "secret", SessionTimeout: time.Second}, nil, NewSessionMap(), sender)
+
+	req := httptest.NewRequest(http.MethodPost, "/internal/wa/send", strings.NewReader(`{"number":"628123","message":"Halo admin"}`))
+	req.Header.Set("Authorization", "Bearer secret")
+	w := httptest.NewRecorder()
+
+	bot.HandleManualSend(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d", w.Code)
+	}
+	select {
+	case got := <-sent:
+		if !strings.Contains(got, `"pesan":"Halo admin"`) {
+			t.Fatalf("sent body = %s", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting manual send")
+	}
+}
+
+func TestWhatsAppBotHandleManualSendUnauthorized(t *testing.T) {
+	bot := NewWhatsAppBot(&WhatsAppBotConfig{InboundSecret: "secret", SessionTimeout: time.Second}, nil, NewSessionMap(), NewWhatsAppSender("http://wa.local", "/send", ""))
+	req := httptest.NewRequest(http.MethodPost, "/internal/wa/send", strings.NewReader(`{"number":"628123","message":"Halo"}`))
+	w := httptest.NewRecorder()
+
+	bot.HandleManualSend(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d", w.Code)
+	}
+}

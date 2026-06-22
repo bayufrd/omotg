@@ -48,6 +48,21 @@ type whatsappReplyEnvelope struct {
 	} `json:"data"`
 }
 
+type WhatsAppManualSendRequest struct {
+	Number  string `json:"number"`
+	Message string `json:"message"`
+}
+
+func (r WhatsAppManualSendRequest) Validate() error {
+	if strings.TrimSpace(r.Number) == "" {
+		return fmt.Errorf("missing number")
+	}
+	if strings.TrimSpace(r.Message) == "" {
+		return fmt.Errorf("missing message")
+	}
+	return nil
+}
+
 func (b *WhatsAppBot) HandleInbound(w http.ResponseWriter, r *http.Request) {
 	slog.Info("whatsapp inbound request received", "remote_addr", r.RemoteAddr)
 	if !b.authorized(r) {
@@ -138,6 +153,38 @@ func (b *WhatsAppBot) HandleInbound(w http.ResponseWriter, r *http.Request) {
 
 	go b.processAsyncPrompt(context.Background(), normalized, sessionID, cmd.Prompt)
 	b.writeReply(w, http.StatusOK, ack)
+}
+
+func (b *WhatsAppBot) HandleManualSend(w http.ResponseWriter, r *http.Request) {
+	slog.Info("whatsapp manual send request received", "remote_addr", r.RemoteAddr)
+	if !b.authorized(r) {
+		slog.Warn("whatsapp manual send auth failed")
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req WhatsAppManualSendRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		slog.Error("whatsapp manual send decode failed", "error", err)
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if err := req.Validate(); err != nil {
+		slog.Warn("whatsapp manual send validate failed", "error", err)
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	result, err := b.sender.SendText(ctx, req.Number, req.Message)
+	if err != nil {
+		slog.Error("whatsapp manual send failed", "error", err, "number", req.Number)
+		b.writeReply(w, http.StatusBadGateway, fmt.Sprintf("Gagal kirim pesan: %s", err))
+		return
+	}
+	slog.Info("whatsapp manual send success", "number", req.Number)
+	b.writeReply(w, http.StatusOK, result)
 }
 
 func (b *WhatsAppBot) processAsyncPrompt(ctx context.Context, msg NormalizedWhatsAppMessage, sessionID, prompt string) {

@@ -95,6 +95,7 @@ func main() {
 	}
 	if cfg.HasWhatsAppConfig() {
 		webhookMux.HandleFunc("POST /internal/wa/inbound", waBot.HandleInbound)
+		webhookMux.HandleFunc("POST /internal/wa/send", waBot.HandleManualSend)
 		slog.Info("whatsapp runtime enabled", "send_url", cfg.WhatsAppSendURL())
 	} else {
 		slog.Info("whatsapp runtime disabled")
