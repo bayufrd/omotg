@@ -19,6 +19,27 @@ type Config struct {
 	SessionTimeout   int // seconds
 	TLSCertFile      string
 	TLSKeyFile       string
+	WAInboundSecret  string
+	WABaseURL        string
+	WAAPIToken       string
+	WASendPath       string
+	WAAllowedChatIDs []string
+	WAServiceSecret  string
+}
+
+func (c *Config) WhatsAppSendURL() string {
+	if c.WABaseURL == "" {
+		return ""
+	}
+	base := strings.TrimRight(c.WABaseURL, "/")
+	path := c.WASendPath
+	if path == "" {
+		path = "/api/whatsapp/send-personal"
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return base + path
 }
 
 func LoadConfig() (*Config, error) {
@@ -27,12 +48,17 @@ func LoadConfig() (*Config, error) {
 	defaultKey := home + "/.config/omotg/webhook.key"
 
 	cfg := &Config{
-		OpenCodeURL:    envOrDefault("OPENCODE_SERVER_URL", "http://127.0.0.1:4096"),
-		WebhookPort:    envOrDefault("OMOTG_WEBHOOK_PORT", "8443"),
-		MCPPort:        envOrDefault("OMOTG_MCP_PORT", "9090"),
-		SessionTimeout: 300,
-		TLSCertFile:    envOrDefault("OMOTG_TLS_CERT_FILE", defaultCert),
-		TLSKeyFile:     envOrDefault("OMOTG_TLS_KEY_FILE", defaultKey),
+		OpenCodeURL:     envOrDefault("OPENCODE_SERVER_URL", "http://127.0.0.1:4096"),
+		WebhookPort:     envOrDefault("OMOTG_WEBHOOK_PORT", "8443"),
+		MCPPort:         envOrDefault("OMOTG_MCP_PORT", "9090"),
+		SessionTimeout:  300,
+		TLSCertFile:     envOrDefault("OMOTG_TLS_CERT_FILE", defaultCert),
+		TLSKeyFile:      envOrDefault("OMOTG_TLS_KEY_FILE", defaultKey),
+		WAInboundSecret: os.Getenv("OMOTG_WA_INBOUND_SECRET"),
+		WABaseURL:       envOrDefault("WHATSAPP_BASE_URL", "http://127.0.0.1:8090"),
+		WAAPIToken:      os.Getenv("WHATSAPP_API_TOKEN"),
+		WASendPath:      envOrDefault("WHATSAPP_SEND_PATH", "/api/whatsapp/send-personal"),
+		WAServiceSecret: os.Getenv("OMOTG_WA_SERVICE_SECRET"),
 	}
 
 	var missing []string
@@ -61,6 +87,18 @@ func LoadConfig() (*Config, error) {
 				return nil, fmt.Errorf("invalid chat ID %q: %w", p, err)
 			}
 			cfg.AllowedChatIDs = append(cfg.AllowedChatIDs, id)
+		}
+	}
+
+	if ids := os.Getenv("OMOTG_WA_ALLOWED_CHAT_IDS"); ids != "" {
+		parts := strings.Split(ids, ",")
+		cfg.WAAllowedChatIDs = make([]string, 0, len(parts))
+		for _, p := range parts {
+			id := strings.TrimSpace(p)
+			if id == "" {
+				continue
+			}
+			cfg.WAAllowedChatIDs = append(cfg.WAAllowedChatIDs, id)
 		}
 	}
 

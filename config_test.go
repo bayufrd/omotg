@@ -11,6 +11,12 @@ func TestLoadConfig(t *testing.T) {
 	t.Setenv("TELEGRAM_SECRET_TOKEN", "sekret")
 	t.Setenv("OPENCODE_SERVER_PASSWORD", "pass123")
 	t.Setenv("OMOTG_ALLOWED_CHAT_IDS", "123,456")
+	t.Setenv("OMOTG_WA_ALLOWED_CHAT_IDS", "628111, 628222 ")
+	t.Setenv("OMOTG_WA_INBOUND_SECRET", "wa-inbound")
+	t.Setenv("OMOTG_WA_SERVICE_SECRET", "wa-service")
+	t.Setenv("WHATSAPP_BASE_URL", "https://wa.example.com/")
+	t.Setenv("WHATSAPP_API_TOKEN", "wa-token")
+	t.Setenv("WHATSAPP_SEND_PATH", "send-personal")
 	t.Setenv("OMOTG_SESSION_TIMEOUT", "600")
 
 	cfg, err := LoadConfig()
@@ -31,6 +37,27 @@ func TestLoadConfig(t *testing.T) {
 	}
 	if len(cfg.AllowedChatIDs) != 2 || cfg.AllowedChatIDs[0] != 123 || cfg.AllowedChatIDs[1] != 456 {
 		t.Errorf("AllowedChatIDs = %v", cfg.AllowedChatIDs)
+	}
+	if len(cfg.WAAllowedChatIDs) != 2 || cfg.WAAllowedChatIDs[0] != "628111" || cfg.WAAllowedChatIDs[1] != "628222" {
+		t.Errorf("WAAllowedChatIDs = %v", cfg.WAAllowedChatIDs)
+	}
+	if cfg.WAInboundSecret != "wa-inbound" {
+		t.Errorf("WAInboundSecret = %q", cfg.WAInboundSecret)
+	}
+	if cfg.WAServiceSecret != "wa-service" {
+		t.Errorf("WAServiceSecret = %q", cfg.WAServiceSecret)
+	}
+	if cfg.WABaseURL != "https://wa.example.com/" {
+		t.Errorf("WABaseURL = %q", cfg.WABaseURL)
+	}
+	if cfg.WAAPIToken != "wa-token" {
+		t.Errorf("WAAPIToken = %q", cfg.WAAPIToken)
+	}
+	if cfg.WASendPath != "send-personal" {
+		t.Errorf("WASendPath = %q", cfg.WASendPath)
+	}
+	if cfg.WhatsAppSendURL() != "https://wa.example.com/send-personal" {
+		t.Errorf("WhatsAppSendURL() = %q", cfg.WhatsAppSendURL())
 	}
 	if cfg.SessionTimeout != 600 {
 		t.Errorf("SessionTimeout = %d, want 600", cfg.SessionTimeout)
@@ -66,11 +93,23 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	if cfg.MCPPort != "9090" {
 		t.Errorf("default MCPPort = %q", cfg.MCPPort)
 	}
+	if cfg.WABaseURL != "http://127.0.0.1:8090" {
+		t.Errorf("default WABaseURL = %q", cfg.WABaseURL)
+	}
+	if cfg.WASendPath != "/api/whatsapp/send-personal" {
+		t.Errorf("default WASendPath = %q", cfg.WASendPath)
+	}
+	if cfg.WhatsAppSendURL() != "http://127.0.0.1:8090/api/whatsapp/send-personal" {
+		t.Errorf("default WhatsAppSendURL() = %q", cfg.WhatsAppSendURL())
+	}
 	if cfg.SessionTimeout != 300 {
 		t.Errorf("default SessionTimeout = %d", cfg.SessionTimeout)
 	}
 	if cfg.AllowedChatIDs != nil {
 		t.Errorf("default AllowedChatIDs should be nil")
+	}
+	if cfg.WAAllowedChatIDs != nil {
+		t.Errorf("default WAAllowedChatIDs should be nil")
 	}
 }
 

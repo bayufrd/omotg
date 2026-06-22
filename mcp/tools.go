@@ -104,6 +104,73 @@ func RegisterTelegramTools(s *Server, sender *TelegramSender) {
 	)
 }
 
+// WhatsAppTextSender sends text to WhatsApp endpoint.
+type WhatsAppTextSender interface {
+	SendText(ctx context.Context, number, message string) (string, error)
+}
+
+// RegisterWhatsAppTools registers send_whatsapp_message and
+// send_whatsapp_notification tools on given MCP server.
+func RegisterWhatsAppTools(s *Server, sender WhatsAppTextSender) {
+	s.RegisterTool(
+		ToolDefinition{
+			Name:        "send_whatsapp_message",
+			Description: "Send text message to WhatsApp number",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]PropertySchema{
+					"number": {Type: "string", Description: "WhatsApp number"},
+					"text":   {Type: "string", Description: "Message text"},
+				},
+				Required: []string{"number", "text"},
+			},
+		},
+		func(ctx context.Context, args json.RawMessage) (string, error) {
+			var params struct {
+				Number string `json:"number"`
+				Text   string `json:"text"`
+			}
+			if err := json.Unmarshal(args, &params); err != nil {
+				return "", fmt.Errorf("invalid arguments: %w", err)
+			}
+			return sender.SendText(ctx, params.Number, params.Text)
+		},
+	)
+
+	s.RegisterTool(
+		ToolDefinition{
+			Name:        "send_whatsapp_notification",
+			Description: "Send formatted notification to WhatsApp number",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]PropertySchema{
+					"number":  {Type: "string", Description: "WhatsApp number"},
+					"status":  {Type: "string", Description: "Notification status: success, error, info, or warning"},
+					"message": {Type: "string", Description: "Notification message text"},
+				},
+				Required: []string{"number", "status", "message"},
+			},
+		},
+		func(ctx context.Context, args json.RawMessage) (string, error) {
+			var params struct {
+				Number  string `json:"number"`
+				Status  string `json:"status"`
+				Message string `json:"message"`
+			}
+			if err := json.Unmarshal(args, &params); err != nil {
+				return "", fmt.Errorf("invalid arguments: %w", err)
+			}
+			emoji := notificationEmoji(params.Status)
+			status := strings.TrimSpace(params.Status)
+			if status == "" {
+				status = "info"
+			}
+			status = strings.ToUpper(status[:1]) + status[1:]
+			return sender.SendText(ctx, params.Number, fmt.Sprintf("%s %s\n%s", emoji, status, params.Message))
+		},
+	)
+}
+
 // sendTelegram posts a message to the Telegram Bot API and checks the response.
 func (s *TelegramSender) sendTelegram(ctx context.Context, chatID, text, parseMode, threadID string) (string, error) {
 	body := map[string]interface{}{
