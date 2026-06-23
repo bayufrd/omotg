@@ -803,13 +803,17 @@ Keberhasilan:
 
 Target:
 - pisahkan adapter WA dari core bridge
-- hilangkan ketergantungan Telegram-specific di path utama
+- jadikan Telegram dan WhatsApp sebagai connector options yang independent
 - rename MCP tools jadi channel-appropriate
 - rapikan config/env
 - update README
 
+Catatan: Telegram bukan sesuatu yang dihapus, tapi tetap jadi connector option.
+Jika Telegram dan WhatsApp sama-sama dikonfigurasi, keduanya jalan bersamaan.
+
 Keberhasilan:
 - codebase lebih bersih dan maintainable
+- Telegram dan WhatsApp bisa jalan bersamaan atau sendiri-sendiri
 
 ## Phase 3 — Persistence database
 

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"omotg/bot"
+	"omotg/db"
 	"omotg/mcp"
 )
 
@@ -29,12 +31,33 @@ func main() {
 	slog.Info("omotg starting",
 		"webhook_port", cfg.WebhookPort,
 		"mcp_port", cfg.MCPPort,
-		"opencode_url", cfg.OpenCodeURL,
+		"provider", cfg.ProviderKind,
+		"provider_base_url", cfg.ProviderBaseURL,
+		"provider_model", cfg.ProviderModel,
 		"session_timeout", cfg.SessionTimeout,
 	)
 
-	// Create OpenCode client.
-	ocClient := bot.NewOCClient(cfg.OpenCodeURL, cfg.OpenCodePassword)
+	// Open SQLite database
+	var database *sql.DB
+	if cfg.DatabasePath != "" || os.Getenv("OMOTG_DATABASE_ENABLED") != "false" {
+		database, err = db.Open(db.Config{Path: cfg.DatabasePath})
+		if err != nil {
+			slog.Error("database open", "error", err)
+			os.Exit(1)
+		}
+		defer database.Close()
+		slog.Info("database connected", "path", cfg.DatabasePath)
+	} else {
+		slog.Info("database disabled")
+	}
+
+	providerClient := bot.NewSessionClient(bot.ProviderConfig{
+		Kind:     bot.ProviderKind(cfg.ProviderKind),
+		BaseURL:  cfg.ProviderBaseURL,
+		APIToken: cfg.ProviderAPIToken,
+		Model:    cfg.ProviderModel,
+		Password: cfg.OpenCodePassword,
+	})
 
 	// Create session map.
 	sessions := bot.NewSessionMap()
@@ -51,7 +74,7 @@ func main() {
 			SessionTimeout: time.Duration(cfg.SessionTimeout) * time.Second,
 			BotToken:       cfg.TelegramBotToken,
 		}
-		bh = bot.NewBot(botCfg, ocClient, sessions, topicClient)
+		bh = bot.NewBot(botCfg, providerClient, sessions, topicClient)
 
 		if len(cfg.AllowedChatIDs) == 0 {
 			slog.Warn("no AllowedChatIDs configured — ALL Telegram chats are allowed")
@@ -74,7 +97,13 @@ func main() {
 		AllowedChatIDs: cfg.WAAllowedChatIDs,
 		SessionTimeout: time.Duration(cfg.SessionTimeout) * time.Second,
 	}
-	waBot := bot.NewWhatsAppBot(waBotCfg, ocClient, sessions, waSender)
+	var sessionStore *db.SessionStore
+	var messageStore *db.MessageStore
+	if database != nil {
+		sessionStore = db.NewSessionStore(database)
+		messageStore = db.NewMessageStore(database)
+	}
+	waBot := bot.NewWhatsAppBot(waBotCfg, providerClient, sessions, waSender, sessionStore, messageStore)
 
 	// Create MCP server and register channel tools.
 	mcpBaseURL := "http://127.0.0.1:" + cfg.MCPPort

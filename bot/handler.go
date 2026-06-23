@@ -78,7 +78,7 @@ type BotConfig struct {
 // Bot handles incoming Telegram webhooks and forwards commands to OpenCode.
 type Bot struct {
 	config      *BotConfig
-	ocClient    *OCClient
+	ocClient    SessionClient
 	sessions    *SessionMap
 	topicClient *TopicClient
 	httpClient  *http.Client
@@ -86,7 +86,7 @@ type Bot struct {
 }
 
 // NewBot creates a new Bot handler.
-func NewBot(cfg *BotConfig, ocClient *OCClient, sessions *SessionMap, topicClient *TopicClient) *Bot {
+func NewBot(cfg *BotConfig, ocClient SessionClient, sessions *SessionMap, topicClient *TopicClient) *Bot {
 	if len(cfg.AllowedChatIDs) == 0 {
 		slog.Warn("NewBot: no AllowedChatIDs configured — ALL chats are allowed")
 	}

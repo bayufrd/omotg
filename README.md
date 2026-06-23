@@ -35,7 +35,17 @@ brew install omotg
 
 This installs the binary to `$(brew --prefix)/bin/omotg` and the env template to `$(brew --prefix)/etc/omotg/env.template`.
 
-### Option 2: Build from Source
+### Option 2: Docker
+
+```bash
+git clone git@github.com:itokun99/omotg.git
+cd omotg
+docker compose up -d
+```
+
+See [docs/docker-deployment.md](docs/docker-deployment.md) for detailed VPS setup with reverse proxy.
+
+### Option 3: Build from Source
 
 ```bash
 git clone git@github.com:itokun99/omotg.git
@@ -142,6 +152,23 @@ systemctl --user start opencode-serve omotg
 
 Configuration is via environment variables in `~/.config/omotg/env`:
 
+### LLM Provider
+
+OMOTG supports two LLM provider modes:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OMOTG_PROVIDER` | `opencode` | Provider mode: `opencode` (default) or `openai-compatible` |
+| `LLM_BASE_URL` | `OPENCODE_SERVER_URL` | Base URL for OpenAI-compatible providers |
+| `LLM_API_TOKEN` | (none) | API token for OpenAI-compatible providers |
+| `LLM_MODEL` | (none) | Model name for OpenAI-compatible providers (e.g., `openai/gpt-4.1-mini`) |
+
+**Provider modes:**
+- `opencode` (default) — Local OpenCode server; requires `OPENCODE_SERVER_PASSWORD`
+- `openai-compatible` / `openai` / `9router` — OpenAI-compatible endpoint; requires `LLM_API_TOKEN` and `LLM_MODEL`
+
+**Note:** `9router` is assumed to be OpenAI-compatible. If your 9router instance uses a different API format, you may need to adjust the provider adapter.
+
 ### Required
 
 | Variable | Description |
@@ -149,13 +176,13 @@ Configuration is via environment variables in `~/.config/omotg/env`:
 | `TELEGRAM_BOT_TOKEN` | Bot token from [@BotFather](https://t.me/botfather) |
 | `TELEGRAM_WEBHOOK_URL` | Public HTTPS URL for Telegram webhook (e.g. `https://your.domain:8443/webhook`) |
 | `TELEGRAM_SECRET_TOKEN` | Custom secret string to verify webhook requests |
-| `OPENCODE_SERVER_PASSWORD` | Password for OpenCode API (opencode serve on localhost ignores auth, but field is required) |
+| `OPENCODE_SERVER_PASSWORD` | Password for OpenCode API (required when `OMOTG_PROVIDER=opencode`) |
 
 ### Optional
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OPENCODE_SERVER_URL` | `http://127.0.0.1:4096` | OpenCode serve URL |
+| `OPENCODE_SERVER_URL` | `http://127.0.0.1:4096` | OpenCode serve URL (also used as fallback for `LLM_BASE_URL`) |
 | `OMOTG_WEBHOOK_PORT` | `8443` | Webhook TLS listen port |
 | `OMOTG_MCP_PORT` | `9090` | MCP SSE server port |
 | `OMOTG_ALLOWED_CHAT_IDS` | (empty = all allowed) | Comma-separated Telegram chat IDs |

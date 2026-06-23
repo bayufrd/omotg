@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"omotg/db"
 )
 
 type WhatsAppBotConfig struct {
@@ -21,17 +23,21 @@ type WhatsAppBotConfig struct {
 
 type WhatsAppBot struct {
 	config   *WhatsAppBotConfig
-	ocClient *OCClient
+	ocClient SessionClient
 	sessions *SessionMap
 	sender   *WhatsAppSender
+	sessionStore *db.SessionStore
+	messageStore *db.MessageStore
 }
 
-func NewWhatsAppBot(cfg *WhatsAppBotConfig, ocClient *OCClient, sessions *SessionMap, sender *WhatsAppSender) *WhatsAppBot {
+func NewWhatsAppBot(cfg *WhatsAppBotConfig, ocClient SessionClient, sessions *SessionMap, sender *WhatsAppSender, sessionStore *db.SessionStore, messageStore *db.MessageStore) *WhatsAppBot {
 	return &WhatsAppBot{
 		config:   cfg,
 		ocClient: ocClient,
 		sessions: sessions,
 		sender:   sender,
+		sessionStore: sessionStore,
+		messageStore: messageStore,
 	}
 }
 

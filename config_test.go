@@ -62,6 +62,18 @@ func TestLoadConfig(t *testing.T) {
 	if cfg.SessionTimeout != 600 {
 		t.Errorf("SessionTimeout = %d, want 600", cfg.SessionTimeout)
 	}
+	if cfg.ProviderKind != "opencode" {
+		t.Errorf("ProviderKind = %q", cfg.ProviderKind)
+	}
+	if cfg.ProviderBaseURL != "http://127.0.0.1:4096" {
+		t.Errorf("ProviderBaseURL = %q", cfg.ProviderBaseURL)
+	}
+	if cfg.ProviderAPIToken != "pass123" {
+		t.Errorf("ProviderAPIToken = %q", cfg.ProviderAPIToken)
+	}
+	if cfg.ProviderModel != "" {
+		t.Errorf("ProviderModel = %q", cfg.ProviderModel)
+	}
 }
 
 func TestLoadConfig_MissingRequired(t *testing.T) {
@@ -129,6 +141,47 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	}
 	if cfg.WAAllowedChatIDs != nil {
 		t.Errorf("default WAAllowedChatIDs should be nil")
+	}
+}
+
+func TestLoadConfig_OpenAICompatible(t *testing.T) {
+	for _, k := range []string{"TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_URL", "TELEGRAM_SECRET_TOKEN", "OPENCODE_SERVER_PASSWORD"} {
+		os.Unsetenv(k)
+	}
+	t.Setenv("OMOTG_WA_INBOUND_SECRET", "wa-secret")
+	t.Setenv("OMOTG_PROVIDER", "9router")
+	t.Setenv("LLM_BASE_URL", "https://router.example.com/v1")
+	t.Setenv("LLM_API_TOKEN", "router-token")
+	t.Setenv("LLM_MODEL", "openai/gpt-4.1-mini")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error: %v", err)
+	}
+	if cfg.ProviderKind != "9router" {
+		t.Fatalf("ProviderKind = %q", cfg.ProviderKind)
+	}
+	if cfg.ProviderBaseURL != "https://router.example.com/v1" {
+		t.Fatalf("ProviderBaseURL = %q", cfg.ProviderBaseURL)
+	}
+	if cfg.ProviderAPIToken != "router-token" {
+		t.Fatalf("ProviderAPIToken = %q", cfg.ProviderAPIToken)
+	}
+	if cfg.ProviderModel != "openai/gpt-4.1-mini" {
+		t.Fatalf("ProviderModel = %q", cfg.ProviderModel)
+	}
+}
+
+func TestLoadConfig_OpenAICompatibleMissingFields(t *testing.T) {
+	for _, k := range []string{"TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_URL", "TELEGRAM_SECRET_TOKEN", "OPENCODE_SERVER_PASSWORD", "LLM_API_TOKEN", "LLM_MODEL"} {
+		os.Unsetenv(k)
+	}
+	t.Setenv("OMOTG_WA_INBOUND_SECRET", "wa-secret")
+	t.Setenv("OMOTG_PROVIDER", "openai-compatible")
+
+	_, err := LoadConfig()
+	if err == nil {
+		t.Fatal("expected error for missing OpenAI-compatible config")
 	}
 }
 

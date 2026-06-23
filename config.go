@@ -11,6 +11,10 @@ type Config struct {
 	TelegramBotToken string
 	WebhookURL       string
 	SecretToken      string
+	ProviderKind     string
+	ProviderBaseURL  string
+	ProviderAPIToken string
+	ProviderModel    string
 	OpenCodeURL      string
 	OpenCodePassword string
 	WebhookPort      string
@@ -25,6 +29,7 @@ type Config struct {
 	WASendPath       string
 	WAAllowedChatIDs []string
 	WAServiceSecret  string
+	DatabasePath     string // SQLite file path, default: ~/.config/omotg/omotg.db
 }
 
 func (c *Config) WhatsAppSendURL() string {
@@ -54,28 +59,52 @@ func LoadConfig() (*Config, error) {
 	home, _ := os.UserHomeDir()
 	defaultCert := home + "/.config/omotg/webhook.crt"
 	defaultKey := home + "/.config/omotg/webhook.key"
+	providerKind := envOrDefault("OMOTG_PROVIDER", "opencode")
+	providerBaseURL := strings.TrimSpace(os.Getenv("LLM_BASE_URL"))
+	if providerBaseURL == "" {
+		providerBaseURL = envOrDefault("OPENCODE_SERVER_URL", "http://127.0.0.1:4096")
+	}
+	providerAPIToken := strings.TrimSpace(os.Getenv("LLM_API_TOKEN"))
+	providerModel := strings.TrimSpace(os.Getenv("LLM_MODEL"))
 
 	cfg := &Config{
-		OpenCodeURL:     envOrDefault("OPENCODE_SERVER_URL", "http://127.0.0.1:4096"),
-		WebhookPort:     envOrDefault("OMOTG_WEBHOOK_PORT", "8443"),
-		MCPPort:         envOrDefault("OMOTG_MCP_PORT", "9090"),
-		SessionTimeout:  300,
-		TLSCertFile:     envOrDefault("OMOTG_TLS_CERT_FILE", defaultCert),
-		TLSKeyFile:      envOrDefault("OMOTG_TLS_KEY_FILE", defaultKey),
-		WAInboundSecret: os.Getenv("OMOTG_WA_INBOUND_SECRET"),
-		WABaseURL:       envOrDefault("WHATSAPP_BASE_URL", "http://127.0.0.1:8090"),
-		WAAPIToken:      os.Getenv("WHATSAPP_API_TOKEN"),
-		WASendPath:      envOrDefault("WHATSAPP_SEND_PATH", "/api/whatsapp/send-personal"),
-		WAServiceSecret: os.Getenv("OMOTG_WA_SERVICE_SECRET"),
+		ProviderKind:     providerKind,
+		ProviderBaseURL:  providerBaseURL,
+		ProviderAPIToken: providerAPIToken,
+		ProviderModel:    providerModel,
+		OpenCodeURL:      envOrDefault("OPENCODE_SERVER_URL", "http://127.0.0.1:4096"),
+		WebhookPort:      envOrDefault("OMOTG_WEBHOOK_PORT", "8443"),
+		MCPPort:          envOrDefault("OMOTG_MCP_PORT", "9090"),
+		SessionTimeout:   300,
+		TLSCertFile:      envOrDefault("OMOTG_TLS_CERT_FILE", defaultCert),
+		TLSKeyFile:       envOrDefault("OMOTG_TLS_KEY_FILE", defaultKey),
+		WAInboundSecret:  os.Getenv("OMOTG_WA_INBOUND_SECRET"),
+		WABaseURL:        envOrDefault("WHATSAPP_BASE_URL", "http://127.0.0.1:8090"),
+		WAAPIToken:       os.Getenv("WHATSAPP_API_TOKEN"),
+		WASendPath:       envOrDefault("WHATSAPP_SEND_PATH", "/api/whatsapp/send-personal"),
+		WAServiceSecret:  os.Getenv("OMOTG_WA_SERVICE_SECRET"),
+		DatabasePath:     os.Getenv("OMOTG_DATABASE_PATH"),
 	}
 
 	cfg.TelegramBotToken = os.Getenv("TELEGRAM_BOT_TOKEN")
 	cfg.WebhookURL = os.Getenv("TELEGRAM_WEBHOOK_URL")
 	cfg.SecretToken = os.Getenv("TELEGRAM_SECRET_TOKEN")
+	cfg.OpenCodePassword = os.Getenv("OPENCODE_SERVER_PASSWORD")
+	if cfg.ProviderAPIToken == "" {
+		cfg.ProviderAPIToken = cfg.OpenCodePassword
+	}
 
 	var missing []string
-	if cfg.OpenCodePassword = os.Getenv("OPENCODE_SERVER_PASSWORD"); cfg.OpenCodePassword == "" {
+	if strings.EqualFold(cfg.ProviderKind, "opencode") && cfg.OpenCodePassword == "" {
 		missing = append(missing, "OPENCODE_SERVER_PASSWORD")
+	}
+	if strings.EqualFold(cfg.ProviderKind, "openai-compatible") || strings.EqualFold(cfg.ProviderKind, "openai") || strings.EqualFold(cfg.ProviderKind, "9router") {
+		if cfg.ProviderAPIToken == "" {
+			missing = append(missing, "LLM_API_TOKEN")
+		}
+		if cfg.ProviderModel == "" {
+			missing = append(missing, "LLM_MODEL")
+		}
 	}
 	if !cfg.HasWhatsAppConfig() {
 		if cfg.TelegramBotToken == "" {

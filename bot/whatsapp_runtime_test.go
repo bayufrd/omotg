@@ -19,7 +19,7 @@ func (s stubRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 func TestWhatsAppBotAuthorized(t *testing.T) {
-	bot := NewWhatsAppBot(&WhatsAppBotConfig{InboundSecret: "bearer-secret", ServiceSecret: "svc-secret"}, nil, nil, nil)
+	bot := NewWhatsAppBot(&WhatsAppBotConfig{InboundSecret: "bearer-secret", ServiceSecret: "svc-secret"}, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/internal/wa/inbound", nil)
 	req.Header.Set("Authorization", "Bearer bearer-secret")
@@ -35,7 +35,7 @@ func TestWhatsAppBotAuthorized(t *testing.T) {
 }
 
 func TestWhatsAppBotHandleInboundUnauthorized(t *testing.T) {
-	bot := NewWhatsAppBot(&WhatsAppBotConfig{InboundSecret: "secret", SessionTimeout: time.Second}, NewOCClient("http://example.com", "p"), NewSessionMap(), NewWhatsAppSender("http://example.com", "/send", ""))
+	bot := NewWhatsAppBot(&WhatsAppBotConfig{InboundSecret: "secret", SessionTimeout: time.Second}, NewOCClient("http://example.com", "p"), NewSessionMap(), NewWhatsAppSender("http://example.com", "/send", ""), nil, nil)
 	req := httptest.NewRequest(http.MethodPost, "/internal/wa/inbound", strings.NewReader(`{}`))
 	w := httptest.NewRecorder()
 
@@ -47,7 +47,7 @@ func TestWhatsAppBotHandleInboundUnauthorized(t *testing.T) {
 }
 
 func TestWhatsAppBotHandleInboundHelp(t *testing.T) {
-	bot := NewWhatsAppBot(&WhatsAppBotConfig{InboundSecret: "secret", SessionTimeout: time.Second}, NewOCClient("http://example.com", "p"), NewSessionMap(), NewWhatsAppSender("http://example.com", "/send", ""))
+	bot := NewWhatsAppBot(&WhatsAppBotConfig{InboundSecret: "secret", SessionTimeout: time.Second}, NewOCClient("http://example.com", "p"), NewSessionMap(), NewWhatsAppSender("http://example.com", "/send", ""), nil, nil)
 	payload := WhatsAppInboundPayload{
 		Command: "help",
 		User:    WhatsAppInboundUser{WANumber: "628123"},
@@ -83,7 +83,7 @@ func TestWhatsAppBotHandleInboundStatusSync(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"parts":[{"type":"text","text":"server ok"}]}`)), Header: make(http.Header)}, nil
 	})}
 
-	bot := NewWhatsAppBot(&WhatsAppBotConfig{InboundSecret: "secret", SessionTimeout: time.Second}, oc, NewSessionMap(), NewWhatsAppSender("http://example.com", "/send", ""))
+	bot := NewWhatsAppBot(&WhatsAppBotConfig{InboundSecret: "secret", SessionTimeout: time.Second}, oc, NewSessionMap(), NewWhatsAppSender("http://example.com", "/send", ""), nil, nil)
 	payload := WhatsAppInboundPayload{
 		Command: "status",
 		User:    WhatsAppInboundUser{WANumber: "628123"},
@@ -119,7 +119,7 @@ func TestWhatsAppBotHandleInboundSessionNew(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"parts":[{"type":"text","text":"halo"}]}`)), Header: make(http.Header)}, nil
 	})}
 
-	bot := NewWhatsAppBot(&WhatsAppBotConfig{InboundSecret: "secret", SessionTimeout: time.Second}, oc, NewSessionMap(), NewWhatsAppSender("http://example.com", "/send", ""))
+	bot := NewWhatsAppBot(&WhatsAppBotConfig{InboundSecret: "secret", SessionTimeout: time.Second}, oc, NewSessionMap(), NewWhatsAppSender("http://example.com", "/send", ""), nil, nil)
 	payload := WhatsAppInboundPayload{
 		Command: "session new halo",
 		User:    WhatsAppInboundUser{WANumber: "628123"},
@@ -157,7 +157,7 @@ func TestWhatsAppBotHandleInboundAsyncPrompt(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"success":true}`)), Header: make(http.Header)}, nil
 	})}
 
-	bot := NewWhatsAppBot(&WhatsAppBotConfig{InboundSecret: "secret", SessionTimeout: 2 * time.Second}, oc, NewSessionMap(), sender)
+	bot := NewWhatsAppBot(&WhatsAppBotConfig{InboundSecret: "secret", SessionTimeout: 2 * time.Second}, oc, NewSessionMap(), sender, nil, nil)
 	payload := WhatsAppInboundPayload{
 		User:    WhatsAppInboundUser{WANumber: "628123"},
 		Message: WhatsAppInboundMessage{Body: "tolong bantu"},
@@ -183,7 +183,7 @@ func TestWhatsAppBotHandleInboundAsyncPrompt(t *testing.T) {
 }
 
 func TestWhatsAppBotSessionList(t *testing.T) {
-	bot := NewWhatsAppBot(&WhatsAppBotConfig{}, nil, NewSessionMap(), nil)
+	bot := NewWhatsAppBot(&WhatsAppBotConfig{}, nil, NewSessionMap(), nil, nil, nil)
 	bot.sessions.Store("sess-1", 10, 0, 0)
 	bot.sessions.Store("sess-2", 10, 0, 0)
 	text, err := bot.handleSessionCommand(context.Background(), 10, ParsedCommand{Type: CmdSession, SessionAct: SessList})
@@ -212,7 +212,7 @@ func TestWhatsAppBotHandleManualSend(t *testing.T) {
 		sent <- string(body)
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"success":true}`)), Header: make(http.Header)}, nil
 	})}
-	bot := NewWhatsAppBot(&WhatsAppBotConfig{InboundSecret: "secret", SessionTimeout: time.Second}, nil, NewSessionMap(), sender)
+	bot := NewWhatsAppBot(&WhatsAppBotConfig{InboundSecret: "secret", SessionTimeout: time.Second}, nil, NewSessionMap(), sender, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/internal/wa/send", strings.NewReader(`{"number":"628123","message":"Halo admin"}`))
 	req.Header.Set("Authorization", "Bearer secret")
@@ -234,7 +234,7 @@ func TestWhatsAppBotHandleManualSend(t *testing.T) {
 }
 
 func TestWhatsAppBotHandleManualSendUnauthorized(t *testing.T) {
-	bot := NewWhatsAppBot(&WhatsAppBotConfig{InboundSecret: "secret", SessionTimeout: time.Second}, nil, NewSessionMap(), NewWhatsAppSender("http://wa.local", "/send", ""))
+	bot := NewWhatsAppBot(&WhatsAppBotConfig{InboundSecret: "secret", SessionTimeout: time.Second}, nil, NewSessionMap(), NewWhatsAppSender("http://wa.local", "/send", ""), nil, nil)
 	req := httptest.NewRequest(http.MethodPost, "/internal/wa/send", strings.NewReader(`{"number":"628123","message":"Halo"}`))
 	w := httptest.NewRecorder()
 
