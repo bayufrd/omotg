@@ -190,6 +190,31 @@ OMOTG supports two LLM provider modes:
 | `OMOTG_TLS_CERT_FILE` | `~/.config/omotg/webhook.crt` | TLS certificate path |
 | `OMOTG_TLS_KEY_FILE` | `~/.config/omotg/webhook.key` | TLS key path |
 
+### Database Persistence
+
+OMOTG includes optional SQLite database persistence for session and message logging:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OMOTG_DATABASE_ENABLED` | `true` | Enable/disable database persistence |
+| `OMOTG_DATABASE_PATH` | `~/.config/omotg/omotg.db` | SQLite database file path |
+
+**Features:**
+- **Session persistence** — Sessions survive app restarts
+- **Message logging** — Audit trail for inbound/outbound messages
+- **Delivery tracking** — Track message delivery attempts
+- **Zero CGO** — Pure Go SQLite via [`modernc.org/sqlite`](https://pkg.go.dev/modernc.org/sqlite)
+
+**Database schema:**
+- `sessions` — Session metadata (channel, chat_id, thread_id, provider_session_id)
+- `messages` — Message logs (session_id, direction, content, status)
+- `delivery_attempts` — Delivery attempt logs (message_id, attempt, status)
+
+To disable the database:
+```bash
+OMOTG_DATABASE_ENABLED=false
+```
+
 ## Usage
 
 ### Telegram Commands

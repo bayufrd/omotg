@@ -143,16 +143,22 @@ func (b *WhatsAppBot) HandleInbound(w http.ResponseWriter, r *http.Request) {
 		ack = fmt.Sprintf("Menjalankan: %s", cmd.RawText)
 	}
 
+	// Log inbound message
+	b.logMessage(r.Context(), sessionID, "inbound", normalized.MessageID, normalized.PromptText, "received", nil)
+
 	if cmd.Type == CmdStatus || cmd.Type == CmdDeploy || cmd.Type == CmdLogs {
 		ctx, cancel := context.WithTimeout(r.Context(), b.config.SessionTimeout)
 		defer cancel()
 		result, err := b.ocClient.SendMessage(ctx, sessionID, buildWhatsAppPrompt(normalized, sessionID, cmd.Prompt))
 		if err != nil {
 			slog.Error("whatsapp sync OpenCode request failed", "error", err)
-			b.writeReply(w, http.StatusOK, fmt.Sprintf("Gagal: %s", err))
+			errMsg := fmt.Sprintf("Gagal: %s", err)
+			b.logMessage(ctx, sessionID, "outbound", "out-"+normalized.MessageID, errMsg, "failed", err)
+			b.writeReply(w, http.StatusOK, errMsg)
 			return
 		}
 		slog.Info("whatsapp sync OpenCode request finished", "session_id", sessionID)
+		b.logMessage(ctx, sessionID, "outbound", "out-"+normalized.MessageID, result, "sent", nil)
 		b.writeReply(w, http.StatusOK, result)
 		return
 	}
@@ -202,9 +208,13 @@ func (b *WhatsAppBot) processAsyncPrompt(ctx context.Context, msg NormalizedWhat
 	result, err := b.ocClient.SendMessage(ctx, sessionID, buildWhatsAppPrompt(msg, sessionID, prompt))
 	if err != nil {
 		slog.Error("whatsapp OpenCode request failed", "error", err, "session_id", sessionID)
-		_, sendErr := b.sender.SendText(context.Background(), msg.ReplyTarget, fmt.Sprintf("❌ Gagal memproses pesan: %s", err))
+		errMsg := fmt.Sprintf("❌ Gagal memproses pesan: %s", err)
+		_, sendErr := b.sender.SendText(context.Background(), msg.ReplyTarget, errMsg)
 		if sendErr != nil {
 			slog.Error("whatsapp outbound send failed", "error", sendErr, "target", msg.ReplyTarget)
+			b.logMessage(context.Background(), sessionID, "outbound", "out-"+msg.MessageID, errMsg, "failed", sendErr)
+		} else {
+			b.logMessage(context.Background(), sessionID, "outbound", "out-"+msg.MessageID, errMsg, "sent", nil)
 		}
 		return
 	}
@@ -214,9 +224,64 @@ func (b *WhatsAppBot) processAsyncPrompt(ctx context.Context, msg NormalizedWhat
 	_, sendErr := b.sender.SendText(context.Background(), msg.ReplyTarget, result)
 	if sendErr != nil {
 		slog.Error("whatsapp outbound send failed", "error", sendErr, "target", msg.ReplyTarget)
+		b.logMessage(context.Background(), sessionID, "outbound", "out-"+msg.MessageID, result, "failed", sendErr)
 		return
 	}
 	slog.Info("whatsapp outbound send success", "target", msg.ReplyTarget, "session_id", sessionID)
+	b.logMessage(context.Background(), sessionID, "outbound", "out-"+msg.MessageID, result, "sent", nil)
+}
+
+// logMessage logs a message to the database if messageStore is enabled
+func (b *WhatsAppBot) logMessage(ctx context.Context, sessionID, direction, messageID, content, status string, errVal error) {
+	if b.messageStore == nil {
+		return
+	}
+	var errStr *string
+	if errVal != nil {
+		s := errVal.Error()
+		errStr = &s
+	}
+	msg := &db.Message{
+		SessionID: sessionID,
+		Channel:   "whatsapp",
+		Direction: direction,
+		MessageID: messageID,
+		Content:   content,
+		Status:    status,
+		Error:     errStr,
+		CreatedAt: time.Now(),
+	}
+	if err := b.messageStore.SaveMessage(ctx, msg); err != nil {
+		slog.Error("failed to save message to db", "error", err)
+	}
+}
+
+// saveSession persists a session to the database if sessionStore is enabled
+func (b *WhatsAppBot) saveSession(ctx context.Context, sessionID string, conversationID int64) {
+	if b.sessionStore == nil {
+		return
+	}
+	dbSess := &db.Session{
+		ID:                sessionID,
+		Channel:           "whatsapp",
+		ChatID:            fmt.Sprintf("%d", conversationID),
+		ProviderSessionID: sessionID,
+		CreatedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
+	}
+	if err := b.sessionStore.CreateSession(ctx, dbSess); err != nil {
+		slog.Error("failed to save session to db", "error", err)
+	}
+}
+
+// deleteSession removes a session from the database if sessionStore is enabled
+func (b *WhatsAppBot) deleteSession(ctx context.Context, sessionID string) {
+	if b.sessionStore == nil {
+		return
+	}
+	if err := b.sessionStore.DeleteSession(ctx, sessionID); err != nil {
+		slog.Error("failed to delete session from db", "error", err)
+	}
 }
 
 func (b *WhatsAppBot) resolveConversationSession(ctx context.Context, conversationID int64) (string, bool, error) {
@@ -229,6 +294,7 @@ func (b *WhatsAppBot) resolveConversationSession(ctx context.Context, conversati
 		return "", false, err
 	}
 	b.sessions.Store(sessionID, conversationID, 0, 0)
+	b.saveSession(ctx, sessionID, conversationID)
 	slog.Info("whatsapp session created", "conversation_id", conversationID, "session_id", sessionID)
 	return sessionID, true, nil
 }
@@ -271,6 +337,7 @@ func (b *WhatsAppBot) handleSessionCommand(ctx context.Context, conversationID i
 			return "", err
 		}
 		b.sessions.Delete(cmd.SessionArg)
+		b.deleteSession(ctx, cmd.SessionArg)
 		return fmt.Sprintf("Session %s dihapus.", cmd.SessionArg), nil
 	case SessNew:
 		sessionID, err := b.ocClient.CreateSession(ctx)
@@ -278,6 +345,7 @@ func (b *WhatsAppBot) handleSessionCommand(ctx context.Context, conversationID i
 			return "", err
 		}
 		b.sessions.Store(sessionID, conversationID, 0, 0)
+		b.saveSession(ctx, sessionID, conversationID)
 		if strings.TrimSpace(cmd.Prompt) == "" {
 			return fmt.Sprintf("Session baru dibuat: %s", sessionID), nil
 		}

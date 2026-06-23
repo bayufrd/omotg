@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"omotg/db"
 )
 
 // telegramMaxMessageLen is the Telegram sendMessage character limit (safe margin).
@@ -77,25 +79,29 @@ type BotConfig struct {
 
 // Bot handles incoming Telegram webhooks and forwards commands to OpenCode.
 type Bot struct {
-	config      *BotConfig
-	ocClient    SessionClient
-	sessions    *SessionMap
-	topicClient *TopicClient
-	httpClient  *http.Client
-	persona     *BotPersona
+	config       *BotConfig
+	ocClient     SessionClient
+	sessions     *SessionMap
+	topicClient  *TopicClient
+	httpClient   *http.Client
+	persona      *BotPersona
+	sessionStore *db.SessionStore
+	messageStore *db.MessageStore
 }
 
 // NewBot creates a new Bot handler.
-func NewBot(cfg *BotConfig, ocClient SessionClient, sessions *SessionMap, topicClient *TopicClient) *Bot {
+func NewBot(cfg *BotConfig, ocClient SessionClient, sessions *SessionMap, topicClient *TopicClient, sessionStore *db.SessionStore, messageStore *db.MessageStore) *Bot {
 	if len(cfg.AllowedChatIDs) == 0 {
 		slog.Warn("NewBot: no AllowedChatIDs configured — ALL chats are allowed")
 	}
 	bot := &Bot{
-		config:      cfg,
-		ocClient:    ocClient,
-		sessions:    sessions,
-		topicClient: topicClient,
-		httpClient:  &http.Client{Timeout: 10 * time.Second},
+		config:       cfg,
+		ocClient:     ocClient,
+		sessions:     sessions,
+		topicClient:  topicClient,
+		httpClient:   &http.Client{Timeout: 10 * time.Second},
+		sessionStore: sessionStore,
+		messageStore: messageStore,
 	}
 	// Fetch bot persona at startup; non-fatal if it fails
 	if p, err := topicClient.GetBotPersona(); err == nil {
@@ -471,6 +477,40 @@ func (b *Bot) startTyping(ctx context.Context, chatID, threadID int64) {
 	}()
 }
 
+// saveSession persists a session to the database if sessionStore is enabled
+func (b *Bot) saveSession(ctx context.Context, sessionID string, chatID, threadID int64) {
+	if b.sessionStore == nil {
+		return
+	}
+	var threadIDStr *string
+	if threadID > 0 {
+		s := fmt.Sprintf("%d", threadID)
+		threadIDStr = &s
+	}
+	dbSess := &db.Session{
+		ID:                sessionID,
+		Channel:           "telegram",
+		ChatID:            fmt.Sprintf("%d", chatID),
+		ThreadID:          threadIDStr,
+		ProviderSessionID: sessionID,
+		CreatedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
+	}
+	if err := b.sessionStore.CreateSession(ctx, dbSess); err != nil {
+		slog.Error("failed to save session to db", "error", err)
+	}
+}
+
+// deleteSession removes a session from the database if sessionStore is enabled
+func (b *Bot) deleteSession(ctx context.Context, sessionID string) {
+	if b.sessionStore == nil {
+		return
+	}
+	if err := b.sessionStore.DeleteSession(ctx, sessionID); err != nil {
+		slog.Error("failed to delete session from db", "error", err)
+	}
+}
+
 // resolveSession returns an existing session ID for reuse, or creates a new one.
 // For private free-chat: reuses current session.
 // For group topics: reuses topic-bound session.
@@ -500,6 +540,7 @@ func (b *Bot) resolveSession(reqCtx context.Context, chatID, threadID int64, isF
 	// Store the session with the original threadID — no auto-create.
 	// Bot replies in the same context (General or topic) as the user's message.
 	b.sessions.Store(newID, chatID, threadID, 0)
+	b.saveSession(ctx, newID, chatID, threadID)
 	return newID, true, threadID, nil
 }
 
@@ -564,6 +605,7 @@ func (b *Bot) handleSessionCommand(chatID, threadID int64, cmd ParsedCommand) {
 			slog.Warn("session delete: failed to delete on OpenCode server", "error", err, "session_id", cmd.SessionArg)
 		}
 		b.sessions.Delete(cmd.SessionArg)
+		b.deleteSession(ctx, cmd.SessionArg)
 		b.sendTelegram(chatID, threadID, fmt.Sprintf("🗑️ Session `%s` dihapus.", cmd.SessionArg))
 
 	case SessNew:
@@ -577,6 +619,7 @@ func (b *Bot) handleSessionCommand(chatID, threadID int64, cmd ParsedCommand) {
 			return
 		}
 		b.sessions.Store(sessionID, chatID, threadID, 0)
+		b.saveSession(ctx, sessionID, chatID, threadID)
 
 		ackText := fmt.Sprintf("🆕 Session baru: `%s`", sessionID)
 		if cmd.Prompt != "" {
@@ -696,6 +739,7 @@ func (b *Bot) handleTopicClose(chatID, threadID int64) {
 
 	if sessionID != "" {
 		b.sessions.Delete(sessionID)
+		b.deleteSession(ctx, sessionID)
 	}
 	b.sessions.DeleteTopicBinding(chatID, threadID)
 	b.sendTelegram(chatID, threadID, "🔒 Topic ditutup. Session OpenCode juga dihapus.")
@@ -722,6 +766,7 @@ func (b *Bot) handleTopicDelete(chatID, threadID int64) {
 
 	if sessionID != "" {
 		b.sessions.Delete(sessionID)
+		b.deleteSession(ctx, sessionID)
 	}
 	b.sessions.DeleteTopicBinding(chatID, threadID)
 	slog.Info("webhook: topic deleted", "chat_id", chatID, "topic_id", threadID)

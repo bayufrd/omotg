@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -62,6 +63,43 @@ func main() {
 	// Create session map.
 	sessions := bot.NewSessionMap()
 
+	// Initialize database stores if database is enabled
+	var sessionStore *db.SessionStore
+	var messageStore *db.MessageStore
+	if database != nil {
+		sessionStore = db.NewSessionStore(database)
+		messageStore = db.NewMessageStore(database)
+
+		// Load existing sessions from database
+		ctx := context.Background()
+		for _, channel := range []string{"telegram", "whatsapp"} {
+			dbSessions, err := sessionStore.ListSessionsByChannel(ctx, channel)
+			if err != nil {
+				slog.Error("failed to list sessions from db", "channel", channel, "error", err)
+			} else if len(dbSessions) > 0 {
+				// Sort sessions so oldest is processed first, newest becomes current
+				for i := len(dbSessions) - 1; i >= 0; i-- {
+					s := dbSessions[i]
+					chatID, err := strconv.ParseInt(s.ChatID, 10, 64)
+					if err != nil {
+						slog.Warn("invalid chat_id in db session", "chat_id", s.ChatID, "error", err)
+						continue
+					}
+					var threadID int64
+					if s.ThreadID != nil && *s.ThreadID != "" {
+						threadID, err = strconv.ParseInt(*s.ThreadID, 10, 64)
+						if err != nil {
+							slog.Warn("invalid thread_id in db session", "thread_id", *s.ThreadID, "error", err)
+							continue
+						}
+					}
+					sessions.Store(s.ID, chatID, threadID, 0)
+				}
+				slog.Info("loaded sessions from db", "channel", channel, "count", len(dbSessions))
+			}
+		}
+	}
+
 	var bh *bot.Bot
 	if cfg.HasTelegramConfig() {
 		// Create TopicClient for forum topics.
@@ -74,7 +112,7 @@ func main() {
 			SessionTimeout: time.Duration(cfg.SessionTimeout) * time.Second,
 			BotToken:       cfg.TelegramBotToken,
 		}
-		bh = bot.NewBot(botCfg, providerClient, sessions, topicClient)
+		bh = bot.NewBot(botCfg, providerClient, sessions, topicClient, sessionStore, messageStore)
 
 		if len(cfg.AllowedChatIDs) == 0 {
 			slog.Warn("no AllowedChatIDs configured — ALL Telegram chats are allowed")
@@ -96,12 +134,6 @@ func main() {
 		ServiceSecret:  cfg.WAServiceSecret,
 		AllowedChatIDs: cfg.WAAllowedChatIDs,
 		SessionTimeout: time.Duration(cfg.SessionTimeout) * time.Second,
-	}
-	var sessionStore *db.SessionStore
-	var messageStore *db.MessageStore
-	if database != nil {
-		sessionStore = db.NewSessionStore(database)
-		messageStore = db.NewMessageStore(database)
 	}
 	waBot := bot.NewWhatsAppBot(waBotCfg, providerClient, sessions, waSender, sessionStore, messageStore)
 
